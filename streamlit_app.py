@@ -168,25 +168,25 @@ if st.button("Pobierz dane"):
                     df = df.filter(pl.col("Data").is_between(start_date, end_date))
 
         st.success("Dane przygotowane.")
-        
+
         # Display statistics about the downloaded dataset
         st.subheader("Statystyki pobranych danych")
         st.metric("Liczba wierszy", len(df))
-        
+
         # Find station column and show unique stations
         station_col = None
         for candidate in source.station_candidates:
             if candidate in df.columns:
                 station_col = candidate
                 break
-        
+
         if station_col:
             unique_stations = df[station_col].unique().sort().to_list()
             st.metric("Liczba unikalnych stacji", len(unique_stations))
             with st.expander("Lista unikalnych stacji"):
                 for station in unique_stations:
                     st.text(station)
-        
+
         st.dataframe(df.head(200))
 
         st.subheader("Eksport do Excel")
