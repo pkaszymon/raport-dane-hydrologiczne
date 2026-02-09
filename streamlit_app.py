@@ -178,7 +178,7 @@ if st.button("Pobierz dane"):
         station_col = find_column(df, source.station_candidates)
 
         if station_col:
-            unique_stations = sorted(df[station_col].unique().to_list())
+            unique_stations = df[station_col].unique().sort().to_list()
             st.metric("Liczba unikalnych stacji", len(unique_stations))
             with st.expander("Lista unikalnych stacji"):
                 for station in unique_stations:
