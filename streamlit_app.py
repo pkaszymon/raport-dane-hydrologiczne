@@ -18,7 +18,6 @@ from imgw_client import (
     decode_text,
     download_bytes,
     extract_zip_entries,
-    filter_by_station,
     list_directory,
     parse_info_legend,
     read_table_from_bytes,
@@ -98,7 +97,6 @@ with st.sidebar:
         "Częstotliwość",
         options=("dobowe", "miesięczne", "surowe 10-min"),
     )
-    station_name = st.text_input("Nazwa stacji", help="Wpisz nazwę wodowskazu lub stacji synoptycznej.")
     use_date_filter = st.checkbox("Filtruj po dacie", value=False)
     date_range = None
     if use_date_filter:
@@ -162,7 +160,6 @@ if st.button("Pobierz dane"):
             if legend_columns:
                 df = apply_legend_columns(df, legend_columns)
 
-            df = filter_by_station(df, station_name, source.station_candidates)
             df = add_date_column(df)
 
             if date_range and isinstance(date_range, tuple) and len(date_range) == 2:
@@ -171,6 +168,25 @@ if st.button("Pobierz dane"):
                     df = df.filter(pl.col("Data").is_between(start_date, end_date))
 
         st.success("Dane przygotowane.")
+        
+        # Display statistics about the downloaded dataset
+        st.subheader("Statystyki pobranych danych")
+        st.metric("Liczba wierszy", len(df))
+        
+        # Find station column and show unique stations
+        station_col = None
+        for candidate in source.station_candidates:
+            if candidate in df.columns:
+                station_col = candidate
+                break
+        
+        if station_col:
+            unique_stations = df[station_col].unique().sort().to_list()
+            st.metric("Liczba unikalnych stacji", len(unique_stations))
+            with st.expander("Lista unikalnych stacji"):
+                for station in unique_stations:
+                    st.text(station)
+        
         st.dataframe(df.head(200))
 
         st.subheader("Eksport do Excel")
