@@ -13,6 +13,7 @@ import polars as pl
 import requests
 
 IMGW_BASE_URL = "https://danepubliczne.imgw.pl/data/dane_pomiarowo_obserwacyjne/"
+IMGW_API_BASE_URL = "https://danepubliczne.imgw.pl/api/data"
 REQUEST_TIMEOUT = 60
 MAX_RETRIES = 3
 RETRY_BACKOFF_MULTIPLIER = 2
@@ -179,3 +180,104 @@ def filter_by_station(df: pl.DataFrame, station_name: str, candidates: Iterable[
     return df.filter(
         pl.col(station_col).cast(pl.Utf8).str.contains(station_name, literal=True, case_sensitive=False)
     )
+
+
+def fetch_api_data(endpoint: str, format_type: str = "json", station_id: int | None = None, station_name: str | None = None) -> bytes:
+    """
+    Fetch data from IMGW API endpoints.
+    
+    Args:
+        endpoint: API endpoint (e.g., 'synop', 'hydro', 'meteo')
+        format_type: Output format ('json', 'xml', 'csv', 'html')
+        station_id: Optional station ID for filtering
+        station_name: Optional station name for filtering (without Polish diacritics)
+    
+    Returns:
+        Response content as bytes
+    """
+    url = f"{IMGW_API_BASE_URL}/{endpoint}"
+    
+    if station_id is not None:
+        url = f"{url}/id/{station_id}"
+    elif station_name is not None:
+        url = f"{url}/station/{station_name}"
+    
+    if format_type != "json":
+        url = f"{url}/format/{format_type}"
+    
+    return download_bytes(url)
+
+
+def parse_api_json_to_dataframe(json_bytes: bytes) -> pl.DataFrame:
+    """
+    Parse JSON response from IMGW API to Polars DataFrame.
+    
+    Args:
+        json_bytes: JSON response from API as bytes
+    
+    Returns:
+        Polars DataFrame with the data
+    """
+    import json
+    
+    text = decode_text(json_bytes)
+    data = json.loads(text)
+    
+    if not data:
+        return pl.DataFrame()
+    
+    # API returns a list of dictionaries
+    if isinstance(data, list):
+        return pl.DataFrame(data)
+    
+    # If single object, wrap in list
+    if isinstance(data, dict):
+        return pl.DataFrame([data])
+    
+    return pl.DataFrame()
+
+
+def fetch_synop_data(station_id: int | None = None, station_name: str | None = None) -> pl.DataFrame:
+    """
+    Fetch current synoptic station data from IMGW API.
+    
+    Args:
+        station_id: Optional station ID for filtering
+        station_name: Optional station name for filtering (without Polish diacritics)
+    
+    Returns:
+        DataFrame with synoptic data
+    """
+    json_bytes = fetch_api_data("synop", station_id=station_id, station_name=station_name)
+    return parse_api_json_to_dataframe(json_bytes)
+
+
+def fetch_hydro_data(station_id: int | None = None, station_name: str | None = None) -> pl.DataFrame:
+    """
+    Fetch current hydrological station data from IMGW API.
+    
+    Args:
+        station_id: Optional station ID for filtering
+        station_name: Optional station name for filtering (without Polish diacritics)
+    
+    Returns:
+        DataFrame with hydrological data
+    """
+    json_bytes = fetch_api_data("hydro", station_id=station_id, station_name=station_name)
+    return parse_api_json_to_dataframe(json_bytes)
+
+
+def fetch_meteo_data(station_id: int | None = None, station_name: str | None = None) -> pl.DataFrame:
+    """
+    Fetch current meteorological station data from IMGW API.
+    
+    Args:
+        station_id: Optional station ID for filtering
+        station_name: Optional station name for filtering (without Polish diacritics)
+    
+    Returns:
+        DataFrame with meteorological data
+    """
+    json_bytes = fetch_api_data("meteo", station_id=station_id, station_name=station_name)
+    return parse_api_json_to_dataframe(json_bytes)
+

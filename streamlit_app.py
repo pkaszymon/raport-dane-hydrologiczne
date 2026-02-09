@@ -18,6 +18,9 @@ from imgw_client import (
     decode_text,
     download_bytes,
     extract_zip_entries,
+    fetch_hydro_data,
+    fetch_meteo_data,
+    fetch_synop_data,
     filter_by_station,
     list_directory,
     parse_info_legend,
@@ -30,6 +33,7 @@ class DataSource:
     label: str
     base_url: str
     station_candidates: tuple[str, ...]
+    is_api: bool = False  # Indicates if this source uses API instead of file downloads
 
 
 DATA_SOURCES = {
@@ -37,16 +41,31 @@ DATA_SOURCES = {
         label="Dane hydrologiczne archiwalne",
         base_url=IMGW_BASE_URL,
         station_candidates=("Nazwa stacji", "Nazwa wodowskazu", "Wodowskaz"),
+        is_api=False,
     ),
-    "hydro_operational": DataSource(
-        label="Dane hydrologiczne operacyjne",
-        base_url="https://danepubliczne.imgw.pl/pl/datastore?product=Hydro",
-        station_candidates=("Nazwa stacji", "Nazwa wodowskazu", "Wodowskaz"),
+    "hydro_api": DataSource(
+        label="Dane hydrologiczne operacyjne (API)",
+        base_url="",  # API doesn't need base URL
+        station_candidates=("stacja", "nazwa_stacji", "rzeka"),
+        is_api=True,
+    ),
+    "synop_api": DataSource(
+        label="Dane synoptyczne (API)",
+        base_url="",  # API doesn't need base URL
+        station_candidates=("stacja", "nazwa_stacji"),
+        is_api=True,
+    ),
+    "meteo_api": DataSource(
+        label="Dane meteorologiczne (API)",
+        base_url="",  # API doesn't need base URL
+        station_candidates=("stacja", "nazwa_stacji"),
+        is_api=True,
     ),
     "climate": DataSource(
-        label="Dane klimatyczne",
+        label="Dane klimatyczne archiwalne",
         base_url=f"{IMGW_BASE_URL}dane_meteorologiczne/",
         station_candidates=("Nazwa stacji", "Stacja", "Stacja synoptyczna"),
+        is_api=False,
     ),
 }
 
@@ -87,60 +106,138 @@ st.markdown(
     "i eksportuje je do Excel po nazwie stacji."
 )
 
-with st.sidebar:
-    st.header("Ustawienia danych")
-    source_key = st.selectbox(
-        "Rodzaj danych",
-        options=list(DATA_SOURCES.keys()),
-        format_func=lambda key: DATA_SOURCES[key].label,
-    )
-    frequency = st.selectbox(
-        "Częstotliwość",
-        options=("dobowe", "miesięczne", "surowe 10-min"),
-    )
-    station_name = st.text_input("Nazwa stacji", help="Wpisz nazwę wodowskazu lub stacji synoptycznej.")
-    use_date_filter = st.checkbox("Filtruj po dacie", value=False)
-    date_range = None
-    if use_date_filter:
-        default_end = date.today()
-        default_start = default_end - timedelta(days=30)
-        date_range = st.date_input("Zakres dat", value=(default_start, default_end))
-    data_url = st.text_input("URL danych", value=DATA_SOURCES[source_key].base_url)
-    info_url = st.text_input("URL pliku info (legenda)")
+st.header("Ustawienia danych")
+
+source_key = st.selectbox(
+    "Rodzaj danych",
+    options=list(DATA_SOURCES.keys()),
+    format_func=lambda key: DATA_SOURCES[key].label,
+)
 
 source = DATA_SOURCES[source_key]
 
+# Different UI for API sources vs file-based sources
+if source.is_api:
+    st.info("Źródło danych: API IMGW (aktualne dane operacyjne)")
+    
+    col1, col2 = st.columns(2)
+    with col1:
+        station_name = st.text_input(
+            "Nazwa stacji (opcjonalnie)", 
+            help="Wpisz nazwę stacji bez polskich znaków (np. 'warszawa', 'krakow'). Pozostaw puste dla wszystkich stacji."
+        )
+    with col2:
+        station_id = st.number_input(
+            "ID stacji (opcjonalnie)",
+            min_value=0,
+            value=0,
+            help="Podaj ID stacji jeśli jest znane. 0 = pobierz wszystkie stacje."
+        )
+    
+    if station_id == 0:
+        station_id = None
+    if not station_name:
+        station_name = None
+    # API always returns current data, no frequency or date filter needed
+    frequency = None
+    use_date_filter = False
+    date_range = None
+    data_url = None
+    info_url = None
+else:
+    st.info("Źródło danych: Pliki archiwalne")
+    
+    col1, col2 = st.columns(2)
+    with col1:
+        frequency = st.selectbox(
+            "Częstotliwość",
+            options=("dobowe", "miesięczne", "surowe 10-min"),
+        )
+        station_name = st.text_input("Nazwa stacji", help="Wpisz nazwę wodowskazu lub stacji synoptycznej.")
+    
+    with col2:
+        use_date_filter = st.checkbox("Filtruj po dacie", value=False)
+        date_range = None
+        if use_date_filter:
+            default_end = date.today()
+            default_start = default_end - timedelta(days=30)
+            date_range = st.date_input("Zakres dat", value=(default_start, default_end))
+    
+    data_url = st.text_input("URL danych", value=source.base_url)
+    info_url = st.text_input("URL pliku info (legenda)")
+
+st.divider()
+
 legend_columns: list[str] = st.session_state.get("legend_columns", [])
-if info_url:
-    if st.button("Pobierz legendę"):
+
+# Legend and directory browsing only for file-based sources
+if not source.is_api:
+    if info_url:
+        if st.button("Pobierz legendę"):
+            try:
+                legend_text = decode_text(download_bytes(info_url))
+                legend_columns = parse_info_legend(legend_text)
+                st.session_state["legend_columns"] = legend_columns
+                if legend_columns:
+                    st.success("Pobrano legendę i wykryto kolumny.")
+                    st.text("\n".join(legend_columns))
+                else:
+                    st.warning("Nie udało się wyodrębnić kolumn z pliku info.")
+            except RuntimeError as exc:
+                st.error(str(exc))
+
+    st.subheader("Podgląd katalogu (opcjonalnie)")
+    if st.button("Pokaż zawartość katalogu"):
         try:
-            legend_text = decode_text(download_bytes(info_url))
-            legend_columns = parse_info_legend(legend_text)
-            st.session_state["legend_columns"] = legend_columns
-            if legend_columns:
-                st.success("Pobrano legendę i wykryto kolumny.")
-                st.text("\n".join(legend_columns))
+            entries = list_directory(data_url)
+            if entries:
+                st.write(format_directory(entries))
             else:
-                st.warning("Nie udało się wyodrębnić kolumn z pliku info.")
+                st.info("Brak widocznych wpisów w katalogu.")
         except RuntimeError as exc:
             st.error(str(exc))
 
-st.subheader("Podgląd katalogu (opcjonalnie)")
-if st.button("Pokaż zawartość katalogu"):
-    try:
-        entries = list_directory(data_url)
-        if entries:
-            st.write(format_directory(entries))
-        else:
-            st.info("Brak widocznych wpisów w katalogu.")
-    except RuntimeError as exc:
-        st.error(str(exc))
 
 st.subheader("Pobieranie danych")
 if st.button("Pobierz dane"):
-    if not data_url:
-        st.error("Podaj URL danych.")
+    df = None
+    
+    # API-based data sources
+    if source.is_api:
+        with st.spinner("Pobieranie danych z API IMGW..."):
+            try:
+                # Normalize station name (remove Polish diacritics)
+                normalized_station = None
+                if station_name:
+                    replacements = str.maketrans({
+                        "ą": "a", "ć": "c", "ę": "e", "ł": "l", "ń": "n",
+                        "ó": "o", "ś": "s", "ż": "z", "ź": "z",
+                        "Ą": "A", "Ć": "C", "Ę": "E", "Ł": "L", "Ń": "N",
+                        "Ó": "O", "Ś": "S", "Ż": "Z", "Ź": "Z",
+                    })
+                    normalized_station = station_name.lower().translate(replacements).replace(" ", "")
+                
+                if source_key == "hydro_api":
+                    df = fetch_hydro_data(station_id=station_id, station_name=normalized_station)
+                elif source_key == "synop_api":
+                    df = fetch_synop_data(station_id=station_id, station_name=normalized_station)
+                elif source_key == "meteo_api":
+                    df = fetch_meteo_data(station_id=station_id, station_name=normalized_station)
+                
+                if df is None or len(df) == 0:
+                    st.warning("Brak danych z API. Sprawdź parametry zapytania.")
+                    st.stop()
+                    
+            except RuntimeError as exc:
+                st.error(f"Błąd podczas pobierania danych z API: {exc}")
+                st.stop()
+    
+    # File-based data sources
     else:
+        if not data_url:
+            st.error("Podaj URL danych.")
+            st.stop()
+        
         with st.spinner("Pobieranie pliku..."):
             try:
                 raw_bytes = download_bytes(data_url)
@@ -170,6 +267,8 @@ if st.button("Pobierz dane"):
                 if "Data" in df.columns:
                     df = df.filter(pl.col("Data").is_between(start_date, end_date))
 
+    # Display results
+    if df is not None:
         st.success("Dane przygotowane.")
         st.dataframe(df.head(200))
 
@@ -183,9 +282,14 @@ if st.button("Pobierz dane"):
         )
         chunks = chunk_dataframe(df, max_rows)
         excel_bytes = dataframe_to_excel_bytes(chunks)
+        
+        # Generate filename
+        freq_label = frequency.replace(" ", "_") if frequency else "api"
+        filename = f"imgw_{source_key}_{freq_label}.xlsx"
+        
         st.download_button(
             "Pobierz Excel",
             data=excel_bytes,
-            file_name=f"imgw_{source_key}_{frequency.replace(' ', '_')}.xlsx",
+            file_name=filename,
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         )
