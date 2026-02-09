@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import io
 from dataclasses import dataclass
-from datetime import date, timedelta
-from typing import Iterable
+from datetime import date, datetime, timedelta
+from typing import Iterable, Optional
 
 import polars as pl
 import streamlit as st
@@ -96,6 +96,192 @@ def dataframe_to_excel_bytes(chunks: list[pl.DataFrame], sheet_prefix: str = "Da
     workbook.close()
     output.seek(0)
     return output.read()
+
+
+def create_data_preview_panel(
+    data: pl.DataFrame,
+    row_limit: int = 100,
+    height: int = 400,
+    title_preview: str = "📋 Podgląd danych",
+    title_stats: str = "📈 Statystyki",
+    columns_to_analyze: Optional[list[str]] = None,
+    date_column: Optional[str] = "Data",
+    sort_by_column: Optional[str] = None,
+    descending: bool = True
+) -> None:
+    """
+    Create a responsive two-column panel with data preview and statistics.
+    
+    Parameters:
+    -----------
+    data : pl.DataFrame
+        The Polars DataFrame to display.
+    row_limit : int
+        Maximum number of rows to display in the preview table.
+    height : int
+        Height of the data table in pixels.
+    title_preview : str
+        Title for the preview/table section.
+    title_stats : str
+        Title for the statistics section.
+    columns_to_analyze : list[str], optional
+        Specific columns to analyze for statistics. If None, analyzes all string columns.
+    date_column : str, optional
+        Name of the column containing date values (e.g., "Data").
+    sort_by_column : str, optional
+        Column name to sort by.
+    descending : bool
+        Whether to sort in descending order.
+    """
+    
+    df = data
+    
+    # Validate data
+    if df.is_empty():
+        st.warning("⚠️ Brak danych do wyświetlenia")
+        return
+    
+    # Sort data if requested
+    if sort_by_column and sort_by_column in df.columns:
+        df = df.sort(sort_by_column, descending=descending)
+    
+    # Create two-column layout
+    col_preview, col_stats = st.columns([3, 1])
+    
+    # LEFT COLUMN: Data Preview Table
+    with col_preview:
+        st.subheader(title_preview)
+        st.dataframe(
+            df.head(row_limit),
+            use_container_width=True,
+            height=height
+        )
+    
+    # RIGHT COLUMN: Statistics
+    with col_stats:
+        st.subheader(title_stats)
+        
+        # Determine which columns to analyze
+        if columns_to_analyze is None:
+            # Auto-detect string columns (excluding date columns)
+            columns_to_analyze = [
+                col for col in df.columns 
+                if col != date_column and (
+                    df[col].dtype in [pl.Utf8, pl.Categorical]
+                )
+            ]
+        
+        # Display basic statistics
+        _display_basic_statistics(df, columns_to_analyze)
+        
+        # Display time range if date column exists
+        if date_column and date_column in df.columns:
+            st.divider()
+            _display_time_statistics(df, date_column)
+    
+    # Additional Info Row
+    st.caption(f"Wyświetlonych rekordów: {min(row_limit, len(df))} z {len(df):,}")
+
+
+def _display_basic_statistics(df: pl.DataFrame, columns_to_analyze: list[str]) -> None:
+    """Display basic statistics for the given columns."""
+    
+    # Create two-column layout for metrics
+    col1, col2 = st.columns(2)
+    
+    # Display only essential metrics
+    with col1:
+        st.metric("📊 Rekordy", f"{len(df):,}")
+    
+    with col2:
+        st.metric("💾 Rozmiar", f"{df.estimated_size('mb'):.1f} MB")
+    
+    # Show unique count for specific important columns
+    priority_groups = {
+        'stations': ['nazwa stacji', 'nazwa wodowskazu', 'wodowskaz', 'stacja', 'nazwa_stacji'],
+        'rivers': ['rzeka'],
+        'provinces': ['wojewodztwo', 'województwo']
+    }
+    
+    shown = set()
+    metrics = []
+    
+    for group_name, priority_columns in priority_groups.items():
+        for col in columns_to_analyze:
+            lower_col = col.lower()
+            if lower_col in priority_columns and col not in shown:
+                if df[col].dtype == pl.Utf8 or df[col].dtype == pl.Categorical:
+                    unique_count = df.select(pl.col(col).n_unique()).item()
+                    col_label = _get_column_label(col)
+                    metrics.append((col_label, unique_count))
+                    shown.add(col)
+                    break  # Show only the first match per group
+    
+    # Display additional metrics in two columns
+    for idx, (label, value) in enumerate(metrics):
+        if idx % 2 == 0:
+            with col1:
+                st.metric(label, value)
+        else:
+            with col2:
+                st.metric(label, value)
+
+
+def _display_time_statistics(df: pl.DataFrame, date_column: str) -> None:
+    """Display time range statistics if date column is available."""
+    
+    st.write("**⏱️ Zakres czasowy:**")
+    
+    try:
+        # Get min and max dates
+        date_values = df.select(pl.col(date_column)).to_series().to_list()
+        
+        # Filter out None values
+        date_values = [d for d in date_values if d is not None]
+        
+        if not date_values:
+            st.caption("Brak danych")
+            return
+        
+        min_date = min(date_values)
+        max_date = max(date_values)
+        
+        # Display dates based on type
+        if isinstance(min_date, date):
+            st.caption(f"🔹 {min_date.strftime('%Y-%m-%d')}")
+            st.caption(f"🔸 {max_date.strftime('%Y-%m-%d')}")
+        else:
+            # String dates - show shortened version
+            st.caption(f"🔹 {str(min_date)[:10]}")
+            st.caption(f"🔸 {str(max_date)[:10]}")
+    
+    except Exception:
+        st.caption("Brak danych")
+
+
+def _get_column_label(column_name: str) -> str:
+    """Convert column name to human-readable Polish label."""
+    
+    labels_map = {
+        'nazwa stacji': '📍 Stacje',
+        'nazwa wodowskazu': '🌊 Wodowskazy',
+        'wodowskaz': '🌊 Wodowskazy',
+        'stacja': '📍 Stacje',
+        'stacja synoptyczna': '☁️ Stacje synoptyczne',
+        'rzeka': '🌊 Rzeki',
+        'status': '✓ Statusy',
+        'nazwa_stacji': '📍 Stacje',
+        'stacja_id': '🔢 ID stacji',
+        'wojewodztwo': '🗺️ Województwa',
+    }
+    
+    lower_name = column_name.lower()
+    
+    if lower_name in labels_map:
+        return labels_map[lower_name]
+    
+    # Fallback: capitalize and add generic label
+    return f"📊 {column_name.capitalize()}"
 
 
 st.set_page_config(page_title="IMGW: raport danych", layout="wide")
@@ -270,7 +456,23 @@ if st.button("Pobierz dane"):
     # Display results
     if df is not None:
         st.success("Dane przygotowane.")
-        st.dataframe(df.head(200))
+        
+        # Determine date column (prefer "Data" for archival, "dtime" for API)
+        date_col = None
+        if "Data" in df.columns:
+            date_col = "Data"
+        elif "dtime" in df.columns:
+            date_col = "dtime"
+        
+        # Display data preview with statistics
+        create_data_preview_panel(
+            data=df,
+            row_limit=200,
+            height=400,
+            date_column=date_col,
+            sort_by_column=date_col,
+            descending=False
+        )
 
         st.subheader("Eksport do Excel")
         max_rows = st.number_input(
