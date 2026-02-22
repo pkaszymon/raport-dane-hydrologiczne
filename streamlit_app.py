@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from datetime import date
 from typing import Optional
 
@@ -11,6 +12,13 @@ import streamlit as st
 from data_processing import chunk_dataframe, dataframe_to_excel_bytes
 from ui_api_tab import render_api_tab
 from ui_file_tab import render_file_tab
+
+logging.basicConfig(
+    level=logging.DEBUG,
+    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+    datefmt="%Y-%m-%d %H:%M:%S",
+)
+logger = logging.getLogger(__name__)
 
 
 def create_data_preview_panel(
@@ -201,6 +209,13 @@ def _get_column_label(column_name: str) -> str:
 
 def _display_results(df: pl.DataFrame, meta: dict) -> None:
     """Display fetched data with a preview panel and Excel export."""
+    logger.info(
+        "Displaying results: source=%s, tab=%s, rows=%d, columns=%d",
+        meta.get("source_key"),
+        meta.get("tab_id"),
+        len(df),
+        len(df.columns),
+    )
     st.success("Dane przygotowane.")
 
     date_col: Optional[str] = None

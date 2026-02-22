@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from datetime import date, timedelta
 from typing import Optional
 
@@ -20,6 +21,8 @@ from imgw_client import (
     parse_info_legend,
     read_table_from_bytes,
 )
+
+logger = logging.getLogger(__name__)
 
 
 def render_file_tab() -> tuple[Optional[pl.DataFrame], dict]:
@@ -73,27 +76,34 @@ def render_file_tab() -> tuple[Optional[pl.DataFrame], dict]:
 
     if info_url:
         if st.button("Pobierz legendę", key="file_btn_legend"):
+            logger.info("Fetching legend from: %s", info_url)
             try:
                 legend_text = decode_text(download_bytes(info_url))
                 legend_columns = parse_info_legend(legend_text)
                 st.session_state["legend_columns"] = legend_columns
                 if legend_columns:
+                    logger.info("Legend loaded: %d columns", len(legend_columns))
                     st.success("Pobrano legendę i wykryto kolumny.")
                     st.text("\n".join(legend_columns))
                 else:
+                    logger.warning("Legend file fetched but no columns extracted from: %s", info_url)
                     st.warning("Nie udało się wyodrębnić kolumn z pliku info.")
             except RuntimeError as exc:
+                logger.error("Failed to fetch legend from %s: %s", info_url, exc)
                 st.error(str(exc))
 
     st.subheader("Podgląd katalogu (opcjonalnie)")
     if st.button("Pokaż zawartość katalogu", key="file_btn_dir"):
+        logger.info("Listing directory: %s", data_url)
         try:
             entries = list_directory(data_url)
             if entries:
                 st.write(format_directory(entries))
             else:
+                logger.info("Directory listing returned no entries for: %s", data_url)
                 st.info("Brak widocznych wpisów w katalogu.")
         except RuntimeError as exc:
+            logger.error("Failed to list directory %s: %s", data_url, exc)
             st.error(str(exc))
 
     st.subheader("Pobieranie danych")
@@ -102,10 +112,18 @@ def render_file_tab() -> tuple[Optional[pl.DataFrame], dict]:
             st.error("Podaj URL danych.")
             return None, {}
 
+        logger.info(
+            "Fetching archival data: source=%s, frequency=%s, station=%r, url=%s",
+            source_key,
+            frequency,
+            station_name or "(all)",
+            data_url,
+        )
         with st.spinner("Pobieranie pliku..."):
             try:
                 raw_bytes = download_bytes(data_url)
             except RuntimeError as exc:
+                logger.error("Download failed for %s: %s", data_url, exc)
                 st.error(str(exc))
                 return None, {}
 
@@ -122,6 +140,7 @@ def render_file_tab() -> tuple[Optional[pl.DataFrame], dict]:
         if not selected_name:
             return None, {}
 
+        logger.debug("Processing file: %s", selected_name)
         with st.spinner("Przetwarzanie danych..."):
             df = read_table_from_bytes(data_candidates[selected_name])
             if legend_columns:
@@ -131,8 +150,17 @@ def render_file_tab() -> tuple[Optional[pl.DataFrame], dict]:
             if date_range and isinstance(date_range, tuple) and len(date_range) == 2:
                 start_date, end_date = date_range
                 if "Data" in df.columns:
+                    rows_before = len(df)
                     df = df.filter(pl.col("Data").is_between(start_date, end_date))
+                    logger.info(
+                        "Date filter %s – %s: %d → %d rows",
+                        start_date,
+                        end_date,
+                        rows_before,
+                        len(df),
+                    )
 
+        logger.info("Archival data ready: %d rows × %d columns", len(df), len(df.columns))
         return df, {"source_key": source_key, "frequency": frequency, "tab_id": "file"}
 
     return None, {}

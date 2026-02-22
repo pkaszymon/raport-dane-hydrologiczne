@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import io
+import logging
 from dataclasses import dataclass
 from typing import Iterable
 
@@ -10,6 +11,8 @@ import polars as pl
 import xlsxwriter
 
 from imgw_client import IMGW_BASE_URL
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -66,12 +69,16 @@ def parse_directory_selection(label: str) -> str:
 def chunk_dataframe(df: pl.DataFrame, max_rows: int) -> list[pl.DataFrame]:
     """Split a DataFrame into chunks of at most *max_rows* rows."""
     if len(df) <= max_rows:
+        logger.debug("DataFrame fits in one chunk (%d rows)", len(df))
         return [df]
-    return [df.slice(offset, max_rows) for offset in range(0, len(df), max_rows)]
+    chunks = [df.slice(offset, max_rows) for offset in range(0, len(df), max_rows)]
+    logger.debug("Split DataFrame (%d rows) into %d chunks of max %d rows", len(df), len(chunks), max_rows)
+    return chunks
 
 
 def dataframe_to_excel_bytes(chunks: list[pl.DataFrame], sheet_prefix: str = "Dane") -> bytes:
     """Serialize a list of DataFrame chunks to an Excel workbook in memory."""
+    logger.info("Exporting %d sheet(s) to Excel", len(chunks))
     output = io.BytesIO()
     workbook = xlsxwriter.Workbook(output, {"in_memory": True})
     for index, chunk in enumerate(chunks, start=1):
@@ -80,9 +87,12 @@ def dataframe_to_excel_bytes(chunks: list[pl.DataFrame], sheet_prefix: str = "Da
         worksheet.write_row(0, 0, chunk.columns)
         for row_index, row in enumerate(chunk.iter_rows(), start=1):
             worksheet.write_row(row_index, 0, row)
+        logger.debug("Sheet '%s': wrote %d rows", sheet_name, len(chunk))
     workbook.close()
     output.seek(0)
-    return output.read()
+    data = output.read()
+    logger.debug("Excel workbook size: %d bytes", len(data))
+    return data
 
 
 def normalize_station_name(station_name: str) -> str:

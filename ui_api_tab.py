@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from typing import Optional
 
 import polars as pl
@@ -9,6 +10,8 @@ import streamlit as st
 
 from data_processing import API_SOURCES, normalize_station_name
 from imgw_client import fetch_hydro_data, fetch_meteo_data, fetch_synop_data
+
+logger = logging.getLogger(__name__)
 
 
 def render_api_tab() -> tuple[Optional[pl.DataFrame], dict]:
@@ -49,6 +52,12 @@ def render_api_tab() -> tuple[Optional[pl.DataFrame], dict]:
 
     st.subheader("Pobieranie danych")
     if st.button("Pobierz dane", key="api_btn_fetch"):
+        logger.info(
+            "Fetching API data: source=%s, station_id=%r, station_name=%r",
+            source_key,
+            resolved_station_id,
+            resolved_station_name,
+        )
         with st.spinner("Pobieranie danych z API IMGW..."):
             try:
                 if source_key == "hydro_api":
@@ -67,17 +76,21 @@ def render_api_tab() -> tuple[Optional[pl.DataFrame], dict]:
                         station_name=resolved_station_name,
                     )
                 else:
+                    logger.error("Unknown API source key: %s", source_key)
                     st.error(f"Nieznane źródło API: {source_key}")
                     return None, {}
 
                 if df is None or len(df) == 0:
+                    logger.warning("API returned no data for source=%s", source_key)
                     st.warning("Brak danych z API. Sprawdź parametry zapytania.")
                     return None, {}
 
             except RuntimeError as exc:
+                logger.error("API fetch failed for source=%s: %s", source_key, exc)
                 st.error(f"Błąd podczas pobierania danych z API: {exc}")
                 return None, {}
 
+        logger.info("API data ready: %d rows × %d columns", len(df), len(df.columns))
         return df, {"source_key": source_key, "frequency": None, "tab_id": "api"}
 
     return None, {}
