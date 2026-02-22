@@ -17,6 +17,7 @@ IMGW_API_BASE_URL = "https://danepubliczne.imgw.pl/api/data"
 REQUEST_TIMEOUT = 60
 MAX_RETRIES = 3
 RETRY_BACKOFF_MULTIPLIER = 2
+ALLOWED_HOST = "danepubliczne.imgw.pl"
 
 
 @dataclass(frozen=True)
@@ -26,8 +27,19 @@ class DirectoryEntry:
     is_dir: bool
 
 
+def _validate_imgw_url(url: str) -> None:
+    """Raise ValueError when *url* does not target the allowed IMGW host."""
+    from urllib.parse import urlparse
+    parsed = urlparse(url)
+    if parsed.scheme not in ("http", "https"):
+        raise ValueError(f"URL scheme must be http or https, got: {parsed.scheme!r}")
+    if parsed.netloc != ALLOWED_HOST:
+        raise ValueError(f"URL host must be {ALLOWED_HOST!r}, got: {parsed.netloc!r}")
+
+
 def download_bytes(url: str) -> bytes:
     """Download content from URL with retry and backoff."""
+    _validate_imgw_url(url)
     last_error: Exception | None = None
     for attempt in range(MAX_RETRIES):
         try:
