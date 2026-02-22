@@ -14,7 +14,7 @@ from ui_api_tab import render_api_tab
 from ui_file_tab import render_file_tab
 
 logging.basicConfig(
-    level=logging.DEBUG,
+    level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
     datefmt="%Y-%m-%d %H:%M:%S",
 )
@@ -268,14 +268,15 @@ st.markdown(
     "i eksportuje je do Excel po nazwie stacji."
 )
 
-tab_archival, tab_api = st.tabs(["📁 Dane archiwalne", "🔗 Dane operacyjne (API)"])
-
+tab_api, tab_archival,  = st.tabs(["🔗 Dane operacyjne (API)", "📁 Dane archiwalne"])
+with tab_api:
+    df_api, meta_api = render_api_tab()
+    if df_api is not None:
+        _display_results(df_api, meta_api)
+        
 with tab_archival:
     df_file, meta_file = render_file_tab()
     if df_file is not None:
         _display_results(df_file, meta_file)
 
-with tab_api:
-    df_api, meta_api = render_api_tab()
-    if df_api is not None:
-        _display_results(df_api, meta_api)
+
