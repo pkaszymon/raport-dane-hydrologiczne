@@ -113,7 +113,7 @@ def normalize_station_name(station_name: str) -> str:
 HYDRO_API_CATEGORIES: list[tuple[str, str, str]] = [
     ("stan_wody", "stan_wody_data_pomiaru", "Stan wody"),
     ("temperatura_wody", "temperatura_wody_data_pomiaru", "Temperatura wody"),
-    ("przelyw", "przeplyw_data", "Przeplyw"),
+    ("przeplyw", "przeplyw_data_pomiaru", "Przeplyw"),
     ("zjawisko_lodowe", "zjawisko_lodowe_data_pomiaru", "Zjawisko lodowe"),
     ("zjawisko_zarastania", "zjawisko_zarastania_data_pomiaru", "Zjawisko zarastania"),
 ]
