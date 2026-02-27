@@ -164,25 +164,31 @@ def _display_time_statistics(df: pl.DataFrame, date_column: str) -> None:
     st.write("**⏱️ Zakres czasowy:**")
     
     try:
-        # Get min and max dates
-        date_values = df.select(pl.col(date_column)).to_series().to_list()
+        # Compute min and max dates using Polars to avoid materializing the full column
+        stats = df.select(
+            pl.col(date_column).min().alias("min_date"),
+            pl.col(date_column).max().alias("max_date"),
+        )
         
-        # Filter out None values
-        date_values = [d for d in date_values if d is not None]
-        
-        if not date_values:
+        # If the result is empty, there is no data to show
+        if stats.height == 0:
             st.caption("Brak danych")
             return
         
-        min_date = min(date_values)
-        max_date = max(date_values)
+        min_date = stats["min_date"][0]
+        max_date = stats["max_date"][0]
+        
+        # Handle cases where all values might be null
+        if min_date is None or max_date is None:
+            st.caption("Brak danych")
+            return
         
         # Display dates based on type
         if isinstance(min_date, date):
             st.caption(f"🔹 {min_date.strftime('%Y-%m-%d')}")
             st.caption(f"🔸 {max_date.strftime('%Y-%m-%d')}")
         else:
-            # String dates - show shortened version
+            # String or other types - show shortened version
             st.caption(f"🔹 {str(min_date)[:10]}")
             st.caption(f"🔸 {str(max_date)[:10]}")
     
