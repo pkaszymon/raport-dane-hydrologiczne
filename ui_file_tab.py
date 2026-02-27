@@ -132,35 +132,48 @@ def render_file_tab() -> tuple[Optional[pl.DataFrame], dict]:
             with st.spinner("Rozpakowywanie archiwum..."):
                 data_candidates = extract_zip_entries(raw_bytes)
 
+        # Persist available files in session state so they survive reruns
+        st.session_state["file_data_candidates"] = data_candidates
+        # Initialize default selection if not yet set
+        if "file_selected_name" not in st.session_state and data_candidates:
+            st.session_state["file_selected_name"] = next(iter(data_candidates.keys()))
+
+        st.success("Plik(i) zostały pobrane. Wybierz plik i przetwórz dane poniżej.")
+
+    # Render file selection and processing outside the download button block
+    data_candidates = st.session_state.get("file_data_candidates")
+    if data_candidates:
         selected_name = st.selectbox(
             "Wybierz plik",
             options=list(data_candidates.keys()),
             key="file_selected_name",
         )
-        if not selected_name:
-            return None, {}
 
-        logger.debug("Processing file: %s", selected_name)
-        with st.spinner("Przetwarzanie danych..."):
-            df = read_table_from_bytes(data_candidates[selected_name])
-            if legend_columns:
-                df = apply_legend_columns(df, legend_columns)
-            df = filter_by_station(df, station_name, source.station_candidates)
-            df = add_date_column(df)
-            if date_range and isinstance(date_range, tuple) and len(date_range) == 2:
-                start_date, end_date = date_range
-                if "Data" in df.columns:
-                    rows_before = len(df)
-                    df = df.filter(pl.col("Data").is_between(start_date, end_date))
-                    logger.info(
-                        "Date filter %s – %s: %d → %d rows",
-                        start_date,
-                        end_date,
-                        rows_before,
-                        len(df),
-                    )
+        if st.button("Przetwórz dane", key="file_btn_process"):
+            if not selected_name:
+                st.error("Wybierz plik do przetworzenia.")
+                return None, {}
 
-        logger.info("Archival data ready: %d rows × %d columns", len(df), len(df.columns))
-        return df, {"source_key": source_key, "frequency": frequency, "tab_id": "file"}
+            logger.debug("Processing file: %s", selected_name)
+            with st.spinner("Przetwarzanie danych..."):
+                df = read_table_from_bytes(data_candidates[selected_name])
+                if legend_columns:
+                    df = apply_legend_columns(df, legend_columns)
+                df = filter_by_station(df, station_name, source.station_candidates)
+                df = add_date_column(df)
+                if date_range and isinstance(date_range, tuple) and len(date_range) == 2:
+                    start_date, end_date = date_range
+                    if "Data" in df.columns:
+                        rows_before = len(df)
+                        df = df.filter(pl.col("Data").is_between(start_date, end_date))
+                        logger.info(
+                            "Date filter %s – %s: %d → %d rows",
+                            start_date,
+                            end_date,
+                            rows_before,
+                            len(df),
+                        )
 
+            logger.info("Archival data ready: %d rows × %d columns", len(df), len(df.columns))
+            return df, {"source_key": source_key, "frequency": frequency, "tab_id": "file"}
     return None, {}
