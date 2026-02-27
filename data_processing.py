@@ -76,6 +76,9 @@ def chunk_dataframe(df: pl.DataFrame, max_rows: int) -> list[pl.DataFrame]:
     return chunks
 
 
+_EXCEL_MAX_SHEET_NAME_LEN = 31  # Excel limits sheet names to 31 characters
+
+
 def dataframe_to_excel_bytes(chunks: list[pl.DataFrame], sheet_prefix: str = "Dane") -> bytes:
     """Serialize a list of DataFrame chunks to an Excel workbook in memory."""
     logger.info("Exporting %d sheet(s) to Excel", len(chunks))
@@ -83,7 +86,7 @@ def dataframe_to_excel_bytes(chunks: list[pl.DataFrame], sheet_prefix: str = "Da
     workbook = xlsxwriter.Workbook(output, {"in_memory": True})
     for index, chunk in enumerate(chunks, start=1):
         sheet_name = sheet_prefix if len(chunks) == 1 else f"{sheet_prefix}{index}"
-        worksheet = workbook.add_worksheet(sheet_name[:31])
+        worksheet = workbook.add_worksheet(sheet_name[:_EXCEL_MAX_SHEET_NAME_LEN])
         worksheet.write_row(0, 0, chunk.columns)
         for row_index, row in enumerate(chunk.iter_rows(), start=1):
             worksheet.write_row(row_index, 0, row)
@@ -104,3 +107,138 @@ def normalize_station_name(station_name: str) -> str:
         "Ó": "O", "Ś": "S", "Ż": "Z", "Ź": "Z",
     })
     return station_name.lower().translate(replacements).replace(" ", "")
+
+
+# Hydro API category definitions: (value_column, date_column, display_label)
+HYDRO_API_CATEGORIES: list[tuple[str, str, str]] = [
+    ("stan_wody", "stan_wody_data_pomiaru", "Stan wody"),
+    ("temperatura_wody", "temperatura_wody_data_pomiaru", "Temperatura wody"),
+    ("przeplyw", "przeplyw_data_pomiaru", "Przeplyw"),
+    ("zjawisko_lodowe", "zjawisko_lodowe_data_pomiaru", "Zjawisko lodowe"),
+    ("zjawisko_zarastania", "zjawisko_zarastania_data_pomiaru", "Zjawisko zarastania"),
+]
+
+# Station metadata columns to include in every category table
+HYDRO_STATION_COLS = ["id_stacji", "stacja", "rzeka", "wojewodztwo"]
+
+# Aggregation interval options: display label -> Polars duration string (None = no aggregation)
+HYDRO_AGGREGATION_INTERVALS: dict[str, str | None] = {
+    "Brak (surowe dane)": None,
+    "Godzinowy": "1h",
+    "Dzienny": "1d",
+    "Tygodniowy": "1w",
+    "Miesięczny": "1mo",
+}
+
+
+def split_hydro_api_data(df: pl.DataFrame) -> dict[str, pl.DataFrame]:
+    """Split a hydro API DataFrame into per-category tables.
+
+    Each returned DataFrame contains station metadata columns plus the
+    measurement value and its timestamp.  Rows where the measurement value is
+    null are removed.  Categories that have no non-null rows are omitted.
+
+    Args:
+        df: Raw hydro API DataFrame (one row per station snapshot).
+
+    Returns:
+        Ordered dict mapping display label to DataFrame for each non-empty
+        category.
+    """
+    result: dict[str, pl.DataFrame] = {}
+    station_cols = [c for c in HYDRO_STATION_COLS if c in df.columns]
+
+    for value_col, date_col, label in HYDRO_API_CATEGORIES:
+        if value_col not in df.columns:
+            logger.debug("Hydro category '%s': value column '%s' not in DataFrame", label, value_col)
+            continue
+
+        keep_cols = station_cols + [c for c in [value_col, date_col] if c in df.columns]
+        category_df = df.select(keep_cols).filter(pl.col(value_col).is_not_null())
+
+        if len(category_df) > 0:
+            result[label] = category_df
+            logger.debug("Hydro category '%s': %d rows", label, len(category_df))
+        else:
+            logger.debug("Hydro category '%s': no non-null rows, skipping", label)
+
+    return result
+
+
+def aggregate_hydro_category(
+    df: pl.DataFrame,
+    date_col: str,
+    value_col: str,
+    interval: str,
+) -> pl.DataFrame:
+    """Aggregate a hydro category DataFrame by a time interval.
+
+    The date column is truncated to the chosen interval and numeric values are
+    averaged across all measurements within the same station + interval bucket.
+
+    Args:
+        df: Category DataFrame (output of :func:`split_hydro_api_data`).
+        date_col: Name of the datetime string column.
+        value_col: Name of the numeric value column.
+        interval: Polars duration string, e.g. ``"1d"``, ``"1h"``.
+
+    Returns:
+        Aggregated DataFrame sorted by station and date.
+    """
+    if date_col not in df.columns or value_col not in df.columns:
+        return df
+
+    station_cols = [c for c in HYDRO_STATION_COLS if c in df.columns]
+
+    df = df.with_columns(
+        pl.col(date_col)
+        .str.strptime(pl.Datetime, "%Y-%m-%d %H:%M:%S", strict=False)
+        .alias(date_col),
+        pl.col(value_col).cast(pl.Float64, strict=False).alias(value_col),
+    )
+
+    df = df.with_columns(
+        pl.col(date_col).dt.truncate(interval).alias(date_col)
+    )
+
+    sort_cols = station_cols + [date_col]
+    df_agg = (
+        df.group_by(sort_cols)
+        .agg(pl.col(value_col).mean().alias(value_col))
+        .sort(sort_cols)
+    )
+
+    logger.debug(
+        "Aggregated '%s' by interval '%s': %d → %d rows",
+        value_col,
+        interval,
+        len(df),
+        len(df_agg),
+    )
+    return df_agg
+
+
+def named_sheets_to_excel_bytes(sheets: dict[str, pl.DataFrame]) -> bytes:
+    """Serialize multiple DataFrames to a single Excel workbook with named sheets.
+
+    Args:
+        sheets: Ordered dict mapping sheet name to DataFrame.
+
+    Returns:
+        Excel workbook as bytes.
+    """
+    logger.info("Exporting %d named sheet(s) to Excel", len(sheets))
+    output = io.BytesIO()
+    workbook = xlsxwriter.Workbook(output, {"in_memory": True})
+    for sheet_name, df in sheets.items():
+        safe_name = sheet_name[:_EXCEL_MAX_SHEET_NAME_LEN]
+        worksheet = workbook.add_worksheet(safe_name)
+        worksheet.write_row(0, 0, df.columns)
+        for row_index, row in enumerate(df.iter_rows(), start=1):
+            worksheet.write_row(row_index, 0, row)
+        logger.debug("Sheet '%s': wrote %d rows", safe_name, len(df))
+    workbook.close()
+    output.seek(0)
+    data = output.read()
+    logger.debug("Excel workbook size: %d bytes", len(data))
+    return data

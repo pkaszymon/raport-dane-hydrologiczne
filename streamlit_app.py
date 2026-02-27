@@ -9,7 +9,15 @@ from typing import Optional
 import polars as pl
 import streamlit as st
 
-from data_processing import chunk_dataframe, dataframe_to_excel_bytes
+from data_processing import (
+    HYDRO_AGGREGATION_INTERVALS,
+    HYDRO_API_CATEGORIES,
+    aggregate_hydro_category,
+    chunk_dataframe,
+    dataframe_to_excel_bytes,
+    named_sheets_to_excel_bytes,
+    split_hydro_api_data,
+)
 from ui_api_tab import render_api_tab
 from ui_file_tab import render_file_tab
 
@@ -207,8 +215,85 @@ def _get_column_label(column_name: str) -> str:
     return f"📊 {column_name.capitalize()}"
 
 
+def _display_hydro_api_results(df: pl.DataFrame, meta: dict) -> None:
+    """Display hydro API data split into category tables with aggregation and Excel export."""
+    logger.info(
+        "Displaying hydro API results: rows=%d, columns=%d",
+        len(df),
+        len(df.columns),
+    )
+    st.success("Dane przygotowane.")
+
+    # Aggregation interval selector
+    st.subheader("Agregacja danych")
+    interval_label = st.selectbox(
+        "Przedział agregacji",
+        options=list(HYDRO_AGGREGATION_INTERVALS.keys()),
+        key="hydro_api_interval",
+    )
+    interval = HYDRO_AGGREGATION_INTERVALS[interval_label]
+
+    # Split into category tables
+    categories = split_hydro_api_data(df)
+
+    if not categories:
+        st.warning("Brak danych do wyświetlenia po podziale na kategorie.")
+        return
+
+    # Determine value/date columns for each category label
+    category_meta: dict[str, tuple[str, str]] = {
+        label: (value_col, date_col)
+        for value_col, date_col, label in HYDRO_API_CATEGORIES
+        if label in categories
+    }
+
+    # Aggregate if requested
+    processed: dict[str, pl.DataFrame] = {}
+    for label, cat_df in categories.items():
+        value_col, date_col = category_meta[label]
+        if interval is not None:
+            cat_df = aggregate_hydro_category(cat_df, date_col, value_col, interval)
+        processed[label] = cat_df
+
+    # Preview each category
+    st.subheader("Podgląd kategorii")
+    for label, cat_df in processed.items():
+        with st.expander(f"📊 {label} ({len(cat_df):,} rekordów)", expanded=False):
+            _, date_col = category_meta[label]
+            date_col_actual = date_col if date_col in cat_df.columns else None
+            create_data_preview_panel(
+                data=cat_df,
+                row_limit=200,
+                height=300,
+                title_preview=label,
+                date_column=date_col_actual,
+                sort_by_column=date_col_actual,
+                descending=False,
+            )
+
+    # Excel export
+    st.subheader("Eksport do Excel")
+    source_key = meta.get("source_key", "hydro_api")
+    freq_label = interval_label.replace(" ", "_").replace("(", "").replace(")", "")
+    filename = f"imgw_{source_key}_{freq_label}.xlsx"
+
+    excel_bytes = named_sheets_to_excel_bytes(processed)
+
+    st.download_button(
+        "Pobierz Excel (wszystkie kategorie)",
+        data=excel_bytes,
+        file_name=filename,
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        key=f"download_{source_key}_hydro_categories",
+    )
+
+
 def _display_results(df: pl.DataFrame, meta: dict) -> None:
     """Display fetched data with a preview panel and Excel export."""
+    if meta.get("source_key") == "hydro_api":
+        _display_hydro_api_results(df, meta)
+        return
+
     logger.info(
         "Displaying results: source=%s, tab=%s, rows=%d, columns=%d",
         meta.get("source_key"),

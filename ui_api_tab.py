@@ -50,6 +50,12 @@ def render_api_tab() -> tuple[Optional[pl.DataFrame], dict]:
     resolved_station_id: int | None = int(station_id) if station_id != 0 else None
     resolved_station_name: str | None = normalize_station_name(station_name) if station_name else None
 
+    # Clear cached data when the user switches to a different source type.
+    cached_meta: dict = st.session_state.get("api_cached_meta", {})
+    if cached_meta.get("source_key") != source_key:
+        st.session_state.pop("api_cached_df", None)
+        st.session_state.pop("api_cached_meta", None)
+
     st.subheader("Pobieranie danych")
     if st.button("Pobierz dane", key="api_btn_fetch"):
         logger.info(
@@ -91,6 +97,14 @@ def render_api_tab() -> tuple[Optional[pl.DataFrame], dict]:
                 return None, {}
 
         logger.info("API data ready: %d rows × %d columns", len(df), len(df.columns))
-        return df, {"source_key": source_key, "frequency": None, "tab_id": "api"}
+        meta = {"source_key": source_key, "frequency": None, "tab_id": "api"}
+        st.session_state["api_cached_df"] = df
+        st.session_state["api_cached_meta"] = meta
+        return df, meta
+
+    # Return previously fetched data so results survive widget interactions
+    # (e.g. changing the aggregation interval) without re-fetching.
+    if "api_cached_df" in st.session_state and "api_cached_meta" in st.session_state:
+        return st.session_state["api_cached_df"], st.session_state["api_cached_meta"]
 
     return None, {}
