@@ -12,13 +12,16 @@ This is a Streamlit web application focused on hydrological (I and II) and clima
 - **openpyxl 3.1.5+** & **xlsxwriter 3.2.9+**: Excel file handling
 
 ### Key Features
-- Data fetching from IMGW public datasets (hydro archival, hydro operational, climate)
+- Data fetching from IMGW public datasets:
+  - **Archival data**: Historical data from file-based sources (hydro, climate)
+  - **Operational data**: Current data from IMGW API (hydro, synoptic, meteorological)
 - Filtering by date range and station names (water gauge for hydro, synoptic station for climate)
 - Hydrological output as daily, monthly, and raw 10-minute data with chunked export
-- Column names mapped from the legend included in dataset info files
+- Column names mapped from the legend included in dataset info files (archival data)
 - Progress tracking and data caching
 - Excel export with multiple output options
 - Polish language UI
+- Support for both file downloads and real-time API data fetching
 
 ## Build & Run
 
@@ -51,7 +54,7 @@ This project includes a devcontainer configuration for GitHub Codespaces:
 │   └── copilot-instructions.md  # This file
 ├── .devcontainer/        # DevContainer configuration for Codespaces
 ├── streamlit_app.py      # Main Streamlit application entry point
-├── pse_api.py           # PSE API client module with pagination and retry logic
+├── imgw_client.py        # IMGW API and data processing client module
 ├── requirements.txt      # Python package dependencies
 ├── README.md            # Project documentation
 ├── LICENSE              # Apache License 2.0
@@ -64,10 +67,12 @@ This project includes a devcontainer configuration for GitHub Codespaces:
   - Handles user input, data fetching coordination, and Excel export
   - Implements caching and progress visualization
   
-- **`pse_api.py`**: API client and data processing utilities (rename or replace when introducing IMGW sources)
-  - Fetch functions with pagination support where applicable
+- **`imgw_client.py`**: IMGW API client and data processing utilities
+  - Functions for fetching data from IMGW REST API (synop, hydro, meteo)
+  - Functions for downloading and parsing archival file-based data
   - Retry logic with exponential backoff
-  - Time coverage calculation and progress tracking utilities
+  - Data parsing utilities (CSV, ZIP archives)
+  - Legend parsing and column mapping
   - Configuration constants (timeouts, retry settings, etc.)
 
 ## Coding Standards
@@ -138,10 +143,15 @@ When making changes to this repository:
 - **License file**: Apache License 2.0 should remain unchanged
 
 ### Data Sources and Constraints
-- IMGW public data base (archival hydro and climate):
-  - https://danepubliczne.imgw.pl/data/dane_pomiarowo_obserwacyjne/
-- Hydrological operational data store:
-  - https://danepubliczne.imgw.pl/pl/datastore?product=Hydro
+- **IMGW API endpoints** (operational/current data):
+  - Synoptic data: https://danepubliczne.imgw.pl/api/data/synop
+  - Hydrological data: https://danepubliczne.imgw.pl/api/data/hydro
+  - Meteorological data: https://danepubliczne.imgw.pl/api/data/meteo
+  - Supports JSON, XML, CSV, HTML formats
+  - Filtering by station ID or station name (without Polish diacritics)
+- **IMGW file-based sources** (archival data):
+  - Public data base: https://danepubliczne.imgw.pl/data/dane_pomiarowo_obserwacyjne/
+  - Contains historical hydro and climate data in ZIP/CSV format
 - Respect server rate limits and use retry logic with backoff
 - Chunk raw 10-minute hydrological data for export to avoid oversized Excel files
 - Default timeout is 60 seconds per request
@@ -160,11 +170,18 @@ When making changes to this repository:
 
 ## Data Configuration
 
-Key configuration values in `pse_api.py` (or a new IMGW client module):
-- `IMGW_BASE_URL`: Base endpoint for IMGW public data
+Key configuration values in `imgw_client.py`:
+- `IMGW_BASE_URL`: Base endpoint for IMGW public file data (https://danepubliczne.imgw.pl/data/dane_pomiarowo_obserwacyjne/)
+- `IMGW_API_BASE_URL`: Base endpoint for IMGW API (https://danepubliczne.imgw.pl/api/data)
 - `REQUEST_TIMEOUT`: 60 seconds
 - `MAX_RETRIES`: 3 attempts
 - `RETRY_BACKOFF_MULTIPLIER`: 2 (exponential backoff)
+
+### Available API Endpoints
+- `fetch_synop_data()`: Get current synoptic station data
+- `fetch_hydro_data()`: Get current hydrological station data
+- `fetch_meteo_data()`: Get current meteorological station data
+- All functions support filtering by station_id or station_name
 
 ## Polish Language Context
 
