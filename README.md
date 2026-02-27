@@ -47,37 +47,41 @@ Aplikacja będzie dostępna pod adresem `http://localhost:8501`
 
 ### Pobieranie danych operacyjnych (API)
 
-1. W menu bocznym wybierz rodzaj danych:
+1. Na stronie głównej wybierz zakładkę **🔗 Dane operacyjne (API)**
+
+2. Z listy rozwijanej wybierz rodzaj danych:
    - "Dane hydrologiczne operacyjne (API)"
    - "Dane synoptyczne (API)"
    - "Dane meteorologiczne (API)"
 
-2. Opcjonalnie podaj nazwę stacji (bez polskich znaków) lub ID stacji
+3. Opcjonalnie podaj nazwę stacji (bez polskich znaków) lub ID stacji
    - Pozostaw puste, aby pobrać dane ze wszystkich stacji
 
-3. Kliknij "Pobierz dane"
+4. Kliknij "Pobierz dane"
 
-4. Eksportuj dane do Excel
+5. Eksportuj dane do Excel
 
 ### Pobieranie danych archiwalnych (pliki)
 
-1. W menu bocznym wybierz rodzaj danych:
+1. Na stronie głównej wybierz zakładkę **📁 Dane archiwalne**
+
+2. Z listy rozwijanej wybierz rodzaj danych:
    - "Dane hydrologiczne archiwalne"
    - "Dane klimatyczne archiwalne"
 
-2. Wybierz częstotliwość: dobowe, miesięczne lub surowe 10-min
+3. Wybierz częstotliwość: dobowe, miesięczne lub surowe 10-min
 
-3. Podaj nazwę stacji (opcjonalnie)
+4. Podaj nazwę stacji (opcjonalnie)
 
-4. Podaj URL do pliku danych i pliku info (legenda)
+5. Podaj URL do pliku danych i pliku info (legenda)
 
-5. Opcjonalnie filtruj po zakresie dat
+6. Opcjonalnie filtruj po zakresie dat
 
-6. Kliknij "Pobierz dane"
+7. Kliknij "Pobierz dane"
 
-7. Wybierz plik z archiwum (jeśli to ZIP)
+8. Wybierz plik z archiwum (jeśli to ZIP)
 
-8. Eksportuj dane do Excel
+9. Eksportuj dane do Excel
 
 ## Funkcje eksportu
 
