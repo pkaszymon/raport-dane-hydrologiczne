@@ -350,69 +350,6 @@ def fetch_meteo_data(station_id: int | None = None, station_name: str | None = N
 
 
 
-@dataclass(frozen=True)
-class DirectoryEntry:
-    name: str
-    href: str
-    is_dir: bool
-
-
-def _validate_imgw_url(url: str) -> None:
-    """Raise ValueError when *url* does not target the allowed IMGW host."""
-    from urllib.parse import urlparse
-    parsed = urlparse(url)
-    if parsed.scheme not in ("http", "https"):
-        raise ValueError(f"URL scheme must be http or https, got: {parsed.scheme!r}")
-    if parsed.netloc != ALLOWED_HOST:
-        raise ValueError(f"URL host must be {ALLOWED_HOST!r}, got: {parsed.netloc!r}")
-
-
-def download_bytes(url: str) -> bytes:
-    """Download content from URL with retry and backoff."""
-    _validate_imgw_url(url)
-    last_error: Exception | None = None
-    for attempt in range(MAX_RETRIES):
-        try:
-            response = requests.get(url, timeout=REQUEST_TIMEOUT)
-            response.raise_for_status()
-            return response.content
-        except requests.RequestException as exc:
-            last_error = exc
-            if attempt < MAX_RETRIES - 1:
-                time.sleep(RETRY_BACKOFF_MULTIPLIER**attempt)
-    raise RuntimeError(f"Failed to download {url}: {last_error}")
-
-
-def list_directory(url: str) -> list[DirectoryEntry]:
-    """Parse Apache-style directory listing into entries."""
-    html = download_bytes(url).decode("utf-8", errors="ignore")
-    entries: list[DirectoryEntry] = []
-    for match in re.finditer(r"<a href=\"([^\"]+)\">([^<]+)</a>", html):
-        href = match.group(1)
-        name = match.group(2)
-        if name in {"../", ".."}:
-            continue
-        is_dir = href.endswith("/")
-        entries.append(DirectoryEntry(name=name.rstrip("/"), href=href, is_dir=is_dir))
-    return entries
-
-
-def extract_zip_entries(data: bytes) -> dict[str, bytes]:
-    """Extract zip content into a filename -> bytes mapping."""
-    with zipfile.ZipFile(io.BytesIO(data)) as zf:
-        return {name: zf.read(name) for name in zf.namelist() if not name.endswith("/")}
-
-
-def decode_text(data: bytes) -> str:
-    """Decode text using common encodings for IMGW data files."""
-    for encoding in ("utf-8", "cp1250", "latin1"):
-        try:
-            return data.decode(encoding)
-        except UnicodeDecodeError:
-            continue
-    return data.decode("latin1", errors="replace")
-
-
 def detect_delimiter(sample_line: str) -> str | None:
     """Detect CSV delimiter from a sample line."""
     for delimiter in (";", ",", "\t", "|"):
